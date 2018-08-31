@@ -56,97 +56,153 @@ def clean_up_data():
 
 #Run the automaton
 #Implements cell division. The division rates are based on the experimental data
-def run_automaton(fit_land, #Fitness landscape
-                n_gen = 40, #Number of simulated generations
-                mut_rate = 0.01, #probability of mutation per generation
-                max_cells = 10**5, # Max number of cells
-                death_rate = 0.05 # Death rate
-                ):
+def run_automaton(fit_land,  # Fitness landscape
+                  n_gen=40,  # Number of simulated generations
+                  mut_rate=0.1,  # probability of mutation per generation
+                  max_cells=10**5,  # Max number of cells
+                  death_rate=0.3,  # Death rate
+                  init_counts=None,
+                  carrying_cap=True
+                  ):
 
-    #Obtain transition matrix for mutations
-    P = random_mutations(len(fit_land))
-
-    #Number of different alleles
+    # Obtain transition matrix for mutations
+    P = random_mutations( len(fit_land) )
+    # Number of different alleles
     n_allele = len(P)
+    # Keeps track of cell counts at each generation
+    counts = np.zeros([n_gen+1, n_allele], dtype=int)
 
-    #initial number of n_cells, 10 of each type
-    n_cells = 10*n_allele
-
-    #This array keeps track of allele type of cells
-    cell_types = np.zeros(max_cells).astype('int64')
-
-    #Division rates are determined by the allele type (from experimental data) and tracked in this array
-    div_rate = np.zeros(max_cells)
-    cell_types[:n_cells] = (n_cells//n_allele)*list( range(n_allele) )
-
-    #experimental growth rates are normalized (divided by the maximum)
-    #such that the fittest divided once per generation
-    div_rate[:n_cells] = (n_cells//n_allele)*list(fit_land/fit_land.max())
-
-    #Keeps track of cell counts at each generation
-    counts = np.zeros([n_gen, n_allele])
+    if init_counts is None:
+        counts[0] = 10*np.ones(n_allele)
+    else:
+        counts[0] = init_counts
 
     for mm in range(n_gen):
 
-        ### Death of cells
-        death_rates = np.random.rand(n_cells)
-        indice = np.where( death_rates>death_rate)[0]
-        temp = div_rate[indice]
-        n_cells = len(temp)
-        div_rate[:] = 0
-        div_rate[:n_cells] = temp
+        n_cells = np.sum( counts[mm] )
 
-        temp = cell_types[indice]
-        cell_types[:] = 0
-        cell_types[:n_cells] = temp
-
-        #Count allele types
-        if n_cells>0:
-            counts[mm] = np.bincount(cell_types[:n_cells], minlength=n_allele)
+        # Scale division rates based on carrying capacity
+        if carrying_cap:
+            division_scale = 1 / (1+(2*np.sum(counts[mm])/max_cells)**4)
         else:
-            counts = counts[:mm]
-            break
+            division_scale = 1
 
-        ### Divide cells based on the division rates
-        #Scale division rates based on carrying capacity
-        division_scale = 1/ ( 1+(2*n_cells/max_cells)**4)
-        division_rates = np.random.rand(n_cells)
-        indice = division_rates<division_scale*div_rate[:n_cells]
+        if counts[mm].sum()>max_cells:
+            division_scale = 0
 
-        #Do not let cell count exceed the max_cells
-        new_cells = np.sum(indice)
-        if (n_cells+new_cells)>max_cells:
-            new_cells = max_cells - n_cells
+        div_rate = np.repeat( fit_land*division_scale, counts[mm] )
+        cell_types = np.repeat( np.arange(n_allele) , counts[mm] )
 
-        #Copy allele type of daughter cells
-        cell_types[n_cells:n_cells+new_cells] = cell_types[:n_cells][indice][:new_cells]
-        #copy division rate of daughter cells
-        div_rate[n_cells:n_cells+new_cells] = div_rate[:n_cells][indice][:new_cells]
+        # Death of cells
+        death_rates = np.random.rand(n_cells)
+        surv_ind = death_rates > death_rate
+        div_rate = div_rate[surv_ind]
+        cell_types = cell_types[surv_ind]
+        n_cells = len(cell_types)
+
+        counts[mm+1] = np.bincount(cell_types, minlength=n_allele)
+
+        #Divide and mutate cells
+        div_ind = np.random.rand(n_cells) < div_rate
+
+        # Mutate cells
+        # initial state of allele types
+        daughter_types = cell_types[div_ind].copy()
+
+        # Generate random numbers to check for mutation
+        daughter_counts = np.bincount( daughter_types , minlength=n_allele)
+
+        # Mutate cells of each allele type
+        for allele in np.random.permutation(np.arange(n_allele)):
+            n_mut = np.sum( np.random.rand( daughter_counts[allele] ) < mut_rate )
+
+            mutations = np.random.choice(n_allele, size=n_mut, p=P[allele]).astype(np.uint8)
+
+            #Add mutating cell to their final types
+            counts[mm+1] +=np.bincount( mutations , minlength=n_allele)
+
+            #Substract mutating cells from that allele
+            daughter_counts[allele] -=n_mut
+
+        counts[mm+1] += daughter_counts
+
+    return counts
 
 
-        ### Mutate cells
-        #initial state of allele types
-        init_types = cell_types[n_cells:n_cells+new_cells].copy()
+def vectorized_abm(fit_land,  # Fitness landscape
+                   n_gen=40,  # Number of simulated generations
+                   mut_rate=0.1,  # probability of mutation per generation
+                   mut_noise=0.05,
+                   max_cells=10**5,  # Max number of cells
+                   death_rate=0.3,  # Death rate
+                   death_noise=0.1,
+                   init_counts=None,
+                   carrying_cap=True
+                   ):
 
-        #Final state of allele types
-        final_types = init_types.copy()
-        #Generate random numbers to check for mutation
-        mutation_rates = np.random.rand(new_cells)
+    # Obtain transition matrix for mutations
+    P = random_mutations(len(fit_land))
+    # Number of different alleles
+    n_allele = len(P)
+    # Keeps track of cell counts at each generation
+    counts = np.zeros([n_gen, n_allele])
 
-        #Mutate cells of each allele type
-        for allele in np.random.permutation( np.arange(n_allele) ):
-            indice = np.logical_and( init_types==allele , mutation_rates < mut_rate )
-            mutations = np.random.choice(n_allele, size=np.sum(indice), p=P[allele])
+    if init_counts is None:
+        counts[0, :] = 10
+    else:
+        counts[0, :] = init_counts
 
-            #Change allele type in final_types
-            np.putmask(final_types, indice, mutations)
 
-        #Copy final allele type to tracking array
-        cell_types[n_cells:n_cells+new_cells] = final_types
-        n_cells = n_cells+new_cells
+    for mm in range(n_gen):
 
-    return P, counts
+        # Death of cells
+        n_cells = np.sum(counts[mm])
 
+        dead_cells = np.random.normal(death_rate, death_noise, n_allele)
+        dead_cells =  counts[mm]* dead_cells
+
+        counts[mm] = counts[mm] - np.int_(dead_cells)
+        counts[mm, counts[mm] < 0] = 0
+
+        # Divide and mutate
+        # Scale division rates based on carrying capacity
+        if carrying_cap:
+            division_scale = 1 / (1+(2*np.sum(counts[mm])/max_cells)**4)
+        else:
+            division_scale = 1
+
+        if counts[mm].sum()>max_cells:
+            division_scale = 0
+
+        dividing_cells = np.int_(counts[mm]*fit_land*division_scale)
+
+#         mutating_cells = dividing_cells*mut_rate
+
+        mutating_cells = np.random.normal(mut_rate, mut_noise, n_allele)
+        mutating_cells =  dividing_cells* mutating_cells
+        mutating_cells = np.int_(mutating_cells)
+
+        final_types = np.zeros(n_allele)
+
+        # Mutate cells of each allele type
+        for allele in np.random.permutation(np.arange(n_allele)):
+            if mutating_cells[allele] > 0:
+                mutations = np.random.choice(
+                    n_allele, size=mutating_cells[allele], p=P[allele])
+
+                final_types += np.bincount(mutations, minlength=n_allele)
+
+        # Add final types to the cell counts
+        new_counts = counts[mm] + dividing_cells - mutating_cells + final_types
+
+        counts[mm] = new_counts
+        counts[mm, counts[mm] < 0] = 0
+
+        if mm < n_gen-1:
+            counts[mm+1] = counts[mm]
+
+
+    return counts
 
 
 def plot_hypercube(pop, ax=None, N=4, node_scale = None, base_node_size = 25.):
