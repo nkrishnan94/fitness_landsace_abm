@@ -31,7 +31,7 @@ def random_mutations(N):
     trans_mat = np.zeros([N,N])
     for mm in range(N):
         for nn in range(N):
-            trans_mat[mm, nn] = hammingDistance( int_to_binary(mm) , int_to_binary(nn))
+            trans_mat[mm, nn] = hammingDistance( int_to_binary(mm,int(np.log2(N))) , int_to_binary(nn,int(np.log2(N))))
 
     trans_mat[trans_mat>1] = 0
     trans_mat = trans_mat/trans_mat.sum(axis=1)
