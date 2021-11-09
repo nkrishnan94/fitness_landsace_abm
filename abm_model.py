@@ -132,10 +132,8 @@ def run_automaton(fit_land,  # Fitness landscape
 def vectorized_abm(fit_land,  # Fitness landscape
                    n_gen=40,  # Number of simulated generations
                    mut_rate=0.1,  # probability of mutation per generation
-                   mut_noise=0.05,
                    max_cells=10**5,  # Max number of cells
                    death_rate=0.3,  # Death rate
-                   death_noise=0.1,
                    init_counts=None,
                    carrying_cap=True
                    ):
@@ -158,8 +156,8 @@ def vectorized_abm(fit_land,  # Fitness landscape
         # Death of cells
         n_cells = np.sum(counts[mm])
 
-        dead_cells = np.random.normal(death_rate, death_noise, n_allele)
-        dead_cells =  counts[mm]* dead_cells
+        #dead_cells = np.random.normal(death_rate, death_noise, n_allele)
+        dead_cells =  np.random.binomial(np.int_(counts[mm]), [death_rate]*n_allele)
 
         counts[mm] = counts[mm] - np.int_(dead_cells)
         counts[mm, counts[mm] < 0] = 0
@@ -176,11 +174,8 @@ def vectorized_abm(fit_land,  # Fitness landscape
 
         dividing_cells = np.int_(counts[mm]*fit_land*division_scale)
 
-#         mutating_cells = dividing_cells*mut_rate
 
-        mutating_cells = np.random.normal(mut_rate, mut_noise, n_allele)
-        mutating_cells =  dividing_cells* mutating_cells
-        mutating_cells = np.int_(mutating_cells)
+        mutating_cells = np.random.binomial(np.int_(dividing_cells), [mut_rate]*n_allele)
 
         final_types = np.zeros(n_allele)
 
@@ -203,6 +198,8 @@ def vectorized_abm(fit_land,  # Fitness landscape
 
 
     return counts
+
+
 
 
 def plot_hypercube(pop, ax=None, N=4, node_scale = None, base_node_size = 25.):
